@@ -8,7 +8,9 @@
 
 *Solo project — NASA C-MAPSS FD001 dataset.*
 
-![Model comparison](assets/model_comparison.png)
+[![Fleet health dashboard](assets/dashboard.png)](https://public.tableau.com/app/profile/hoedong.kim/viz/EngineHealthMaintenancePriority/Dashboard1)
+
+*[Open the interactive dashboard →](https://public.tableau.com/app/profile/hoedong.kim/viz/EngineHealthMaintenancePriority/Dashboard1)*
 
 ---
 
@@ -91,6 +93,8 @@ Mean ± standard deviation across seeds 42, 43 and 44:
 
 *Bold marks the best mean in each column — no model leads on all four.*
 
+![Model comparison](assets/model_comparison.png)
+
 ![Predicted vs actual](assets/predicted_vs_actual.png)
 
 The best models land within roughly **15 flight cycles** of the truth. The four
@@ -160,9 +164,55 @@ than the second decimal place of RMSE.
 ├── seed_study.csv        Per-model, per-seed metrics behind the error bars
 ├── upload_to_neon.py     One-off loader: raw text files -> Postgres
 ├── db_schema.sql         Database schema
+├── export_predictions.py Trains the two dashboard models, writes predictions
+├── dashboard_views.sql   Views the dashboard reads
+├── dashboard/            Flattened predictions the Tableau workbook loads
 ├── CMaps/                Raw NASA C-MAPSS data
 └── assets/               Figures used in this README
 ```
+
+## 🖥 Fleet Health Dashboard
+
+**[→ Open the live dashboard on Tableau Public](https://public.tableau.com/app/profile/hoedong.kim/viz/EngineHealthMaintenancePriority/Dashboard1)**
+
+A maintenance view built on the same predictions — not model metrics, but which
+engine needs attention and when. `export_predictions.py` trains CNN-LSTM and
+1D CNN, scores every test engine at every cycle, and writes the results to
+Postgres plus `dashboard/rul_predictions.csv`.
+
+Engines are banded by predicted remaining life. The 30-cycle red line is set
+from the measured error, not picked for looks: test RMSE is ~15 cycles, so it
+leaves roughly two standard errors of margin.
+
+| Band | Engines (CNN-LSTM) | Mean error |
+|---|---|---|
+| Critical (≤30 cycles) | 18 | 5.2 cycles |
+| Warning (31–60) | 14 | 8.6 cycles |
+| Healthy (>60) | 68 | 14.3 cycles |
+
+Accuracy is highest in the band where a decision actually gets made — a
+consequence of capping the training target at 125 cycles, which concentrates
+learning on the degradation phase.
+
+"Now" is each engine's last recorded cycle, which is exactly the point the model
+was evaluated at, so the dashboard and the notebook report the same numbers.
+
+**What it shows.** Four panels, none of them model metrics: fleet counts by risk
+band, an alert list ranked by urgency with a plain-language action per engine
+(*Ground now* / *Schedule maintenance*), a scatter placing all 100 engines by
+flights flown against flights remaining, and a per-engine trajectory that appears
+when you click any engine. The alert and warning thresholds are exposed as
+controls, so a reader can move the 30-cycle line and watch the counts change.
+
+The grey line on the trajectory chart is the ground truth, shown for validation —
+in production only the prediction exists.
+
+**On the data connection.** The pipeline is Postgres-backed end to end:
+`export_predictions.py` writes predictions to Neon and `dashboard_views.sql`
+defines the two views the dashboard consumes. Tableau Public cannot hold a live
+database connection — it has nowhere to store credentials — so the workbook reads
+a CSV exported from those views. Pointing Tableau Desktop or Looker Studio at
+`cmapss.v_fleet_dashboard` gives the same dashboard over a live connection.
 
 ## 🚀 Run the Project
 
