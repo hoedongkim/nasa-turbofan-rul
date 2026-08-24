@@ -1,5 +1,4 @@
-<!-- Binder badge: replace USERNAME/REPO below once this is pushed to GitHub. -->
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/USERNAME/REPO/HEAD?labpath=NASA_Turbofan_Jet_Engine_EDA_Predictive_Model.ipynb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/hoedongkim/nasa-turbofan-rul/HEAD?labpath=NASA_Turbofan_Jet_Engine_EDA_Predictive_Model.ipynb)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
