@@ -1,0 +1,13 @@
+# Environment for mybinder.org.
+#
+# The notebook reads from Neon Postgres when DATABASE_URL is set and falls back
+# to the CMaps/*.txt files otherwise. Binder has no credentials, so it takes the
+# file path — which needs no database driver. Keeping sqlalchemy/psycopg out of
+# this list keeps the image build shorter.
+pandas>=2.0
+numpy>=1.26
+matplotlib>=3.8
+seaborn>=0.13
+scikit-learn>=1.4
+xgboost>=2.0
+tensorflow-cpu>=2.16

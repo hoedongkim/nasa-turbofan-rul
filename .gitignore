@@ -1,0 +1,15 @@
+# Secrets — DATABASE_URL holds the Neon password
+.env
+
+# macOS / editor cruft
+.DS_Store
+.Rhistory
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local working files
+*.bak
+_readme_preview.html
