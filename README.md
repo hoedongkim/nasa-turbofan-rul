@@ -163,19 +163,20 @@ metric that would set that margin in practice, since it already encodes the
 asymmetry: an over-optimistic prediction is the expensive kind of wrong.
 
 **Is 25–30 flights a useful amount of warning?** In C-MAPSS one cycle is one
-flight, and a large narrowbody averages about
-[3.6 departures a day](https://web.mit.edu/airlinedata/www/2020%2012%20Month%20Documents/Aircraft%20and%20Related/Large%20Narrow/Average%20Daily%20Block%20Hour%20Utilization%20of%20Total%20Large%20Narrowbody%20Fleet.htm),
-so the window is roughly a week of notice. That is the scale the surrounding
-logistics move on: airlines carry spare engines at [roughly a 10% ratio](https://avitrader.com/2025/07/15/how-to-ensure-adequate-spare-engine-coverage/)
-precisely because unscheduled removals cannot be absorbed on the day. What a week
-buys is the chance to turn an unscheduled removal into a scheduled one, and so to
-avoid an aircraft-on-ground event, [commonly estimated at
-$10,000–150,000 per hour](https://simpleflying.com/aircraft-grounding-cost-to-airlines-and-manufacturers/)
+flight, and a large narrowbody averages about 3.6 departures a day, so the
+window is roughly a week of notice. That is the scale the surrounding logistics
+move on: airlines carry spare engines at roughly a 10% ratio precisely because
+unscheduled removals cannot be absorbed on the day. What a week buys is the
+chance to turn an unscheduled removal into a scheduled one, and so to avoid an
+aircraft-on-ground event, commonly estimated at $10,000–150,000 per hour
 depending on aircraft and route.
 
 That is a plausibility check against published figures, not a validated lead
 time. The right window depends on an operator's spare coverage, shop capacity and
 network, none of which C-MAPSS describes.
+
+*Figures from the MIT Airline Data Project, AviTrader, and published
+aircraft-on-ground cost estimates.*
 
 ## 📌 Takeaways
 
