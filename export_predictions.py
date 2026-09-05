@@ -39,19 +39,40 @@ import tensorflow as tf
 from dotenv import load_dotenv
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.callbacks import EarlyStopping
+from xgboost import XGBRegressor
 
 import cmapss_db as db
 # Architectures are imported rather than re-typed so the dashboard cannot drift
 # away from the models the notebook and the seed study evaluated.
-from seed_study import (DROP_COLS, RUL_CAP, SENSOR_COLS, WINDOW_SEQ,
-                        build_cnn, build_cnn_lstm, create_sequences, evaluate)
+from seed_study import (DROP_COLS, RUL_CAP, SENSOR_COLS, WINDOW_SEQ, WINDOW_XGB,
+                        add_rolling_features, build_cnn, build_cnn_lstm, build_gru,
+                        build_lstm, create_sequences, evaluate)
 
 SEED = 42
-MODELS = {"CNN-LSTM": build_cnn_lstm, "1D CNN": build_cnn}
 
-# Alert thresholds, in flight cycles of remaining life. Grounded in the measured
-# error rather than picked for looks: test RMSE is ~15 cycles, so a 30-cycle red
-# band leaves roughly two standard errors of margin before actual failure.
+# All five models the notebook compares. XGBoost is handled separately below —
+# it reads one cycle at a time with rolling summaries rather than a window.
+SEQ_MODELS = {"LSTM": build_lstm, "GRU": build_gru,
+              "1D CNN": build_cnn, "CNN-LSTM": build_cnn_lstm}
+
+# Sensors shown in the per-engine drill-down, taken in RandomForest importance
+# order (Ps30 alone carries 69% of it, T50 another 12%). Four is what fits on a
+# dashboard panel without the reader losing the thread.
+DRILLDOWN_SENSORS = {
+    "Ps30": "Ps30 — HPC outlet pressure (rises with wear)",
+    "T50":  "T50 — LPT outlet temperature (rises with wear)",
+    "phi":  "phi — fuel flow ratio (falls with wear)",
+    "BPR":  "BPR — bypass ratio (rises with wear)",
+}
+# A per-cycle median needs enough surviving engines to mean anything; past this
+# point the fleet has thinned out and the comparison line is left blank.
+MIN_PEERS = 10
+
+# Default alert thresholds, in flight cycles of remaining life. Illustrative, not
+# calibrated: doing it properly means knowing what an in-service failure costs
+# relative to pulling an engine early, and how often engines actually fail at each
+# predicted RUL. Neither is in C-MAPSS. The dashboard overrides these with live
+# parameters, so nothing downstream depends on the numbers here.
 CRITICAL, WARNING = 30, 60
 
 SCHEMA = """
@@ -151,18 +172,12 @@ def main() -> int:
     keys["true_rul"] = (keys.current_cycle - keys.time_cycles) + keys.final_rul
 
     history, status = [], []
-    for name, builder in MODELS.items():
-        tf.keras.utils.set_random_seed(SEED)
-        model = builder(X_train.shape[1:])
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
-        hist = model.fit(X_train, y_train, epochs=args.epochs, batch_size=64,
-                         validation_split=0.2, verbose=0,
-                         callbacks=[EarlyStopping(monitor="val_loss", patience=10,
-                                                  restore_best_weights=True)])
 
+    def record(name: str, predictions: pd.Series, note: str) -> None:
+        """Attach one model's predictions to the key frame and log its scores."""
         df = keys.copy()
         df["model"] = name
-        df["predicted_rul"] = model.predict(X_all, verbose=0).flatten()
+        df["predicted_rul"] = predictions.to_numpy()
         df["risk_band"] = df.predicted_rul.map(risk_band)
         history.append(df)
 
@@ -171,10 +186,37 @@ def main() -> int:
         status.append(today)
 
         m = evaluate(today.true_rul.values, today.predicted_rul.values)
-        print(f"{name:9s} {len(hist.history['loss']):3d} epochs | "
-              f"RMSE {m['RMSE']:6.3f} MAE {m['MAE']:6.3f} | "
+        print(f"{name:9s} {note:12s} | RMSE {m['RMSE']:6.3f} MAE {m['MAE']:6.3f} | "
               f"critical {int((today.risk_band == '1 Critical').sum()):3d} engines", flush=True)
+
+    for name, builder in SEQ_MODELS.items():
+        tf.keras.utils.set_random_seed(SEED)
+        model = builder(X_train.shape[1:])
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
+        hist = model.fit(X_train, y_train, epochs=args.epochs, batch_size=64,
+                         validation_split=0.2, verbose=0,
+                         callbacks=[EarlyStopping(monitor="val_loss", patience=10,
+                                                  restore_best_weights=True)])
+        preds = pd.Series(model.predict(X_all, verbose=0).flatten(), index=keys.index)
+        record(name, preds, f"{len(hist.history['loss'])} epochs")
         tf.keras.backend.clear_session()
+
+    # XGBoost: no sequence window, so it is scored on rolling summaries of the
+    # same rows. Predictions are aligned to `keys` so every model covers exactly
+    # the same cycles and the dashboard can switch between them cleanly.
+    tr_fe = add_rolling_features(train, SENSOR_COLS, WINDOW_XGB)
+    te_fe = add_rolling_features(test, SENSOR_COLS, WINDOW_XGB)
+    feature_cols = [c for c in tr_fe.columns
+                    if c not in ("unit_number", "time_in_cycles", "RUL_Max", "RUL")]
+    xgb = XGBRegressor(n_estimators=200, learning_rate=0.05, max_depth=6,
+                       random_state=SEED, verbosity=0)
+    xgb.fit(tr_fe[feature_cols], tr_fe["RUL"])
+    te_fe = te_fe.assign(predicted_rul=xgb.predict(te_fe[feature_cols])) \
+                 .rename(columns={"time_in_cycles": "time_cycles"})
+    aligned = keys.merge(te_fe[["unit_number", "time_cycles", "predicted_rul"]],
+                         on=["unit_number", "time_cycles"], how="left")
+    assert aligned.predicted_rul.notna().all(), "XGBoost rows did not align to keys"
+    record("XGBoost", aligned.predicted_rul, "200 trees")
 
     history = pd.concat(history, ignore_index=True)
     status = pd.concat(status, ignore_index=True)
@@ -200,6 +242,7 @@ def main() -> int:
         conn.commit()
 
     write_dashboard_csv(args.dataset)
+    write_sensor_drilldown(args.dataset)
     return 0
 
 
@@ -232,10 +275,65 @@ def write_dashboard_csv(dataset: str) -> None:
     for col in ("risk_band", "risk_band_now"):
         df[col] = df[col].str.slice(2)
 
+    # Two decimals is already past the model's precision — RMSE is ~15 cycles.
+    # Trimming here roughly halves the file the Tableau workbook has to carry.
+    for col in ("predicted_rul", "predicted_rul_now", "abs_error_now"):
+        df[col] = df[col].round(2)
+
     out = pathlib.Path(__file__).parent / "dashboard" / "rul_predictions.csv"
     out.parent.mkdir(exist_ok=True)
     df.to_csv(out, index=False)
     print(f"  {out.relative_to(out.parent.parent)}: {len(df):,} rows x {df.shape[1]} cols "
+          f"({out.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+
+def write_sensor_drilldown(dataset: str) -> None:
+    """Raw sensor traces for the per-engine drill-down, against a fleet baseline.
+
+    Long format — one row per engine x cycle x sensor — because that is what lets
+    Tableau draw four stacked panels from a single field rather than four
+    separate measures. Values are unscaled so a reader sees real units, and a
+    10-cycle rolling mean is carried alongside because the raw traces are too
+    noisy to read a trend off. Sensors carry no model dimension, so this is a
+    second, smaller file rather than more columns on the prediction one.
+    """
+    _, test, _ = db.load_notebook_frames(dataset)
+    sensors = list(DRILLDOWN_SENSORS)
+    test = test[["unit_number", "time_in_cycles"] + sensors].copy()
+
+    smoothed = (test.groupby("unit_number")[sensors]
+                    .transform(lambda x: x.rolling(WINDOW_XGB, min_periods=1).mean()))
+
+    long = (test.melt(id_vars=["unit_number", "time_in_cycles"],
+                      value_vars=sensors, var_name="sensor", value_name="value")
+                .merge(smoothed.assign(unit_number=test.unit_number,
+                                       time_in_cycles=test.time_in_cycles)
+                               .melt(id_vars=["unit_number", "time_in_cycles"],
+                                     value_vars=sensors, var_name="sensor",
+                                     value_name="value_smoothed"),
+                       on=["unit_number", "time_in_cycles", "sensor"]))
+
+    # Fleet baseline: the median engine at the same age, where enough peers remain.
+    grp = long.groupby(["sensor", "time_in_cycles"])["value_smoothed"]
+    baseline = grp.median().rename("fleet_median").reset_index()
+    baseline["peers"] = grp.size().values
+    baseline.loc[baseline.peers < MIN_PEERS, "fleet_median"] = pd.NA
+    long = long.merge(baseline.drop(columns="peers"),
+                      on=["sensor", "time_in_cycles"], how="left")
+
+    # Match the prediction file: the models say nothing before cycle 30.
+    long = long[long.time_in_cycles >= WINDOW_SEQ].copy()
+    long["sensor_label"] = long.sensor.map(DRILLDOWN_SENSORS)
+    long = long.rename(columns={"time_in_cycles": "time_cycles"})
+    for col in ("value", "value_smoothed", "fleet_median"):
+        long[col] = long[col].astype(float).round(3)
+
+    out = pathlib.Path(__file__).parent / "dashboard" / "sensor_drilldown.csv"
+    out.parent.mkdir(exist_ok=True)
+    cols = ["unit_number", "time_cycles", "sensor", "sensor_label",
+            "value", "value_smoothed", "fleet_median"]
+    long.sort_values(["unit_number", "sensor", "time_cycles"])[cols].to_csv(out, index=False)
+    print(f"  {out.relative_to(out.parent.parent)}: {len(long):,} rows x {len(cols)} cols "
           f"({out.stat().st_size / 1e6:.1f} MB)", flush=True)
 
 

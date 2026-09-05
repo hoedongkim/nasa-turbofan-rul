@@ -81,17 +81,18 @@ is real or an accident of initialisation. This turned out to matter — see
 
 ## 📈 Results
 
-Mean ± standard deviation across seeds 42, 43 and 44:
+Mean ± standard deviation across 15 seeds (42–56):
 
-| Model | RMSE | MAE | R² | NASA Score | Train time |
-|---|---|---|---|---|---|
-| XGBoost | 19.83 ± 0.00 | 14.73 ± 0.00 | 0.772 | 1305.1 | 1 s |
-| LSTM | 15.08 ± 0.61 | 11.43 ± 0.57 | 0.868 | 410.8 | 102–162 s |
-| GRU | 15.07 ± 0.04 | 11.30 ± 0.17 | 0.869 | 429.1 | 96–162 s |
-| 1D CNN | 14.99 ± 0.20 | **11.13 ± 0.27** | 0.870 | **369.4** | 16–29 s |
-| CNN-LSTM | **14.87 ± 0.10** | 11.37 ± 0.53 | **0.872** | 385.0 | 32–42 s |
+| Model | RMSE | MAE | R² | NASA Score |
+|---|---|---|---|---|
+| XGBoost | 19.83 ± 0.00 | 14.73 ± 0.00 | 0.772 | 1305.1 |
+| LSTM | 15.35 ± 0.50 | 11.52 ± 0.46 | 0.863 | 451.1 |
+| GRU | 15.05 ± 0.36 | 11.31 ± 0.45 | 0.869 | 411.5 |
+| 1D CNN | 15.13 ± 0.34 | 11.39 ± 0.38 | 0.867 | 378.7 |
+| CNN-LSTM | 14.98 ± 0.45 | 11.68 ± 0.73 | 0.870 | 387.2 |
 
-*Bold marks the best mean in each column — no model leads on all four.*
+*No bolding: on RMSE the four sequence models are not separable, so marking a*
+*winner would overstate what 15 runs can tell apart.*
 
 ![Model comparison](assets/model_comparison.png)
 
@@ -100,6 +101,28 @@ Mean ± standard deviation across seeds 42, 43 and 44:
 The best models land within roughly **15 flight cycles** of the truth. The four
 sequence models beat the tabular baseline by about **5 RMSE**, and that gap holds
 in every seed.
+
+### How many runs is enough?
+
+Neural networks land somewhere different on every random seed, so any single run
+is one draw rather than a result. The question is how many draws it takes before
+the picture stops moving — so the study was repeated at 3, 5, 7, 10 and 15 seeds
+and the estimates recomputed each time.
+
+![Seed sensitivity](assets/seed_sensitivity.png)
+
+The lines barely move. CNN-LSTM has the lowest mean RMSE at every step, but its
+error bars overlap its neighbours' at every step too, and a paired comparison
+across the 15 seeds separates it from none of them — GRU t = 0.57, 1D CNN
+t = 0.99, LSTM t = 2.12, all short of the 2.14 that 15 runs would demand.
+
+The table above reports all fifteen, since they exist. The point of the sweep is
+that three would have said the same thing: the extra twelve runs cost an hour of
+training and moved no conclusion. That is worth knowing before spending the hour.
+
+What every step does show, unchanged, is the gap to the tabular baseline. All
+four sequence models beat XGBoost in **15 of 15 seeds**, by 4.5–4.9 RMSE. That is
+the ranking this experiment actually establishes.
 
 ## 💡 Key Insights
 
@@ -139,13 +162,28 @@ engines while still recovering most of the remaining life. The NASA Score is the
 metric that would set that margin in practice, since it already encodes the
 asymmetry: an over-optimistic prediction is the expensive kind of wrong.
 
+**Is 25–30 flights a useful amount of warning?** In C-MAPSS one cycle is one
+flight, and a large narrowbody averages about
+[3.6 departures a day](https://web.mit.edu/airlinedata/www/2020%2012%20Month%20Documents/Aircraft%20and%20Related/Large%20Narrow/Average%20Daily%20Block%20Hour%20Utilization%20of%20Total%20Large%20Narrowbody%20Fleet.htm),
+so the window is roughly a week of notice. That is the scale the surrounding
+logistics move on: airlines carry spare engines at [roughly a 10% ratio](https://avitrader.com/2025/07/15/how-to-ensure-adequate-spare-engine-coverage/)
+precisely because unscheduled removals cannot be absorbed on the day. What a week
+buys is the chance to turn an unscheduled removal into a scheduled one, and so to
+avoid an aircraft-on-ground event, [commonly estimated at
+$10,000–150,000 per hour](https://simpleflying.com/aircraft-grounding-cost-to-airlines-and-manufacturers/)
+depending on aircraft and route.
+
+That is a plausibility check against published figures, not a validated lead
+time. The right window depends on an operator's spare coverage, shop capacity and
+network, none of which C-MAPSS describes.
+
 ## 📌 Takeaways
 
 **A single training run cannot rank models that finish this close.** The first
 version of this project concluded CNN-LSTM was the winner, beating GRU by 0.06
-RMSE. Re-running under three seeds showed that gap was noise: LSTM alone swings
-±0.61 between seeds, and at seed 42 the 1D CNN comes first instead. The four
-sequence models are a tie, and separating them would take roughly 15 seeds, not 3.
+RMSE. Re-running under 15 seeds showed that gap was noise — individual runs swing
+by half a cycle, and no pair of sequence models separates under a paired test.
+Reporting a winner would have meant reporting the seed.
 
 **What the experiment does establish is the comparison it was built for.**
 Sequence models beat the tabular baseline by ~5 RMSE, in every seed. Reading the
@@ -155,34 +193,23 @@ Sequence models beat the tabular baseline by ~5 RMSE, in every seed. Reading the
 GRU for statistically indistinguishable accuracy — a far better basis for choosing
 than the second decimal place of RMSE.
 
-## 📁 Repository Structure
-
-```
-├── NASA_Turbofan_Jet_Engine_EDA_Predictive_Model.ipynb   Main analysis (outputs included)
-├── cmapss_db.py          Data loader — Neon Postgres, or CMaps/*.txt as fallback
-├── seed_study.py         Re-runs every model across seeds -> seed_study.csv
-├── seed_study.csv        Per-model, per-seed metrics behind the error bars
-├── upload_to_neon.py     One-off loader: raw text files -> Postgres
-├── db_schema.sql         Database schema
-├── export_predictions.py Trains the two dashboard models, writes predictions
-├── dashboard_views.sql   Views the dashboard reads
-├── dashboard/            Flattened predictions the Tableau workbook loads
-├── CMaps/                Raw NASA C-MAPSS data
-└── assets/               Figures used in this README
-```
-
 ## 🖥 Fleet Health Dashboard
 
 **[→ Open the live dashboard on Tableau Public](https://public.tableau.com/app/profile/hoedong.kim/viz/EngineHealthMaintenancePriority/Dashboard1)**
 
 A maintenance view built on the same predictions — not model metrics, but which
-engine needs attention and when. `export_predictions.py` trains CNN-LSTM and
-1D CNN, scores every test engine at every cycle, and writes the results to
-Postgres plus `dashboard/rul_predictions.csv`.
+engine needs attention and when. `export_predictions.py` trains all five models,
+scores every test engine at every cycle, and writes the results to Postgres plus
+`dashboard/rul_predictions.csv`. The dashboard's model switch runs across all
+five, so the seed study's "these are tied" conclusion can be checked by hand:
+at the default thresholds the critical count moves between 17 and 23 engines
+depending on which model is asked.
 
-Engines are banded by predicted remaining life. The 30-cycle red line is set
-from the measured error, not picked for looks: test RMSE is ~15 cycles, so it
-leaves roughly two standard errors of margin.
+Engines are banded by predicted remaining life. The 30-cycle threshold is
+illustrative, not calibrated. Doing it properly means knowing two things this
+project cannot see: what an in-service failure costs relative to pulling an
+engine early, and how often engines actually fail at each predicted RUL. Neither
+is in C-MAPSS — which is why the threshold is a slider rather than a constant.
 
 | Band | Engines (CNN-LSTM) | Mean error |
 |---|---|---|
@@ -197,15 +224,69 @@ learning on the degradation phase.
 "Now" is each engine's last recorded cycle, which is exactly the point the model
 was evaluated at, so the dashboard and the notebook report the same numbers.
 
-**What it shows.** Four panels, none of them model metrics: fleet counts by risk
-band, an alert list ranked by urgency with a plain-language action per engine
-(*Ground now* / *Schedule maintenance*), a scatter placing all 100 engines by
-flights flown against flights remaining, and a per-engine trajectory that appears
-when you click any engine. The alert and warning thresholds are exposed as
-controls, so a reader can move the 30-cycle line and watch the counts change.
+**What it shows.** Five panels, none of them model metrics:
+
+- **Fleet counts** by risk band, plus how many engines the current maintenance
+  capacity can actually reach in time
+- **Alert list**, ranked by urgency, with a plain-language action per engine
+  (*Ground now* / *Schedule maintenance*)
+- **Fleet scatter** placing all 100 engines by flights flown against flights
+  remaining, so the wear-out corner is visible at a glance
+- **Engine trajectory** — predicted remaining life over that engine's whole
+  history, titled with the engine number
+- **Sensor drill-down** — the four sensors that drive the prediction, plotted
+  against the fleet median at the same age
+
+Clicking any engine, in the alert list or the scatter, drives both bottom panels.
+
+**Thresholds are live.** The alert and warning lines are parameters, not values
+baked into the data: the risk band and the recommended action are recomputed in
+the workbook, so dragging the 30-cycle slider moves the counts, the scatter
+colours, the alert list and every *Ground now* / *Schedule maintenance* label
+together.
 
 The grey line on the trajectory chart is the ground truth, shown for validation —
 in production only the prediction exists.
+
+### Why is this engine flagged?
+
+The trajectory panel says an engine is nearly out of life; the drill-down says
+what the model saw. It plots four sensors — picked by RandomForest importance,
+where `Ps30` alone carries 69% and `T50` another 12% — against the median engine
+of the same age, over a 10-cycle rolling mean because the raw traces are too
+noisy to read a trend off.
+
+Engine 76, first in the queue, is the clearest case. Over its 205 cycles the
+exhaust temperature `T50` climbed 25.8 units and compressor outlet pressure
+`Ps30` crossed above its peers around cycle 180. The healthiest engine in the
+fleet moved 1.4 and 0.0 over the same measures. That is compressor wear showing
+up exactly as the physics predicts, and it is the difference between a dashboard
+that scores engines and one that explains itself.
+
+The fleet median stops at cycle 198, where fewer than ten engines are still
+flying and a median would say more about survivorship than about wear.
+
+### What if we cannot service them all?
+
+Knowing thirty-two engines need attention is not yet a decision — a shop that
+handles three engines every five cycles cannot start them all today. Two
+parameters describe that capacity, and the workbook queues engines by urgency,
+works out how long each waits for its slot, and marks whether its predicted
+remaining life survives the wait.
+
+The interesting part is that the answer is not linear:
+
+| Capacity | Serviced in time |
+|---|---|
+| 0.4 engines/cycle | 8 of 32 |
+| 0.6 engines/cycle | 27 of 32 |
+| 0.8 engines/cycle | 32 of 32 |
+
+Raising throughput by half takes the fleet from eight engines saved to
+twenty-seven. Around that cliff the *In time* and *Too late* labels interleave,
+because wait time steps up in blocks while remaining life rises smoothly — engine
+77 clears its slot by half a cycle. That is a schedule with no slack in it, which
+is itself worth knowing.
 
 **On the data connection.** The pipeline is Postgres-backed end to end:
 `export_predictions.py` writes predictions to Neon and `dashboard_views.sql`
@@ -214,49 +295,26 @@ database connection — it has nowhere to store credentials — so the workbook 
 a CSV exported from those views. Pointing Tableau Desktop or Looker Studio at
 `cmapss.v_fleet_dashboard` gives the same dashboard over a live connection.
 
-## 🚀 Run the Project
+## 📁 Repository Structure
 
-**Just read it** — the notebook is committed with all outputs, so every figure and
-number renders on GitHub without running anything.
-
-**In the browser** — click the Binder badge at the top. Binder takes 5–15 minutes
-to build the first time. EDA runs quickly; training the four neural networks on
-Binder's free tier is slow (20–30 min) and may run out of memory.
-
-**Locally:**
-
-```bash
-git clone <this repo> && cd <this repo>
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/jupyter lab
+```
+├── NASA_Turbofan_Jet_Engine_EDA_Predictive_Model.ipynb   Main analysis (outputs included)
+├── cmapss_db.py          Data loader — Neon Postgres, or CMaps/*.txt as fallback
+├── seed_study.py         Re-runs every model across seeds -> seed_study.csv
+├── seed_study.csv        Per-model, per-seed metrics behind the error bars
+├── plot_seed_sensitivity.py  Draws the "does 15 seeds beat 3?" figure
+├── upload_to_neon.py     One-off loader: raw text files -> Postgres
+├── db_schema.sql         Database schema
+├── export_predictions.py Trains all five models, writes predictions
+├── dashboard_views.sql   Views the dashboard reads
+├── dashboard/            Flattened predictions and sensor traces the workbook loads
+├── CMaps/                Raw NASA C-MAPSS data
+└── assets/               Figures used in this README
 ```
 
-No database or credentials needed — `cmapss_db.py` reads `CMaps/*.txt` when
-`DATABASE_URL` is unset.
-
-**With Postgres (optional).** The analysis was authored against a
-[Neon](https://neon.tech) database. To reproduce that setup, put a connection
-string in `.env` and load the data:
-
-```bash
-cp .env.example .env     # then paste your connection string
-python upload_to_neon.py
-```
-
-`cmapss_db.py` switches to the database automatically. Both paths return identical
-frames — verified value-for-value across all four C-MAPSS sub-datasets — so results
-never depend on which source is active.
-
-**Reproducing the seed study:**
-
-```bash
-python seed_study.py                  # seeds 42, 43, 44 -> seed_study.csv
-python seed_study.py --seeds 42 43 44 45 46
-```
-
-Every model is seeded from the `SEED` constant in the notebook's setup cell, and
-all metrics are collected programmatically — no number in the tables or charts is
-transcribed by hand.
+The notebook is committed with its outputs — every figure and number renders on
+GitHub without running anything. The Binder badge above opens it live, and takes
+5–15 minutes to build the first time.
 
 ## 🛠 Tech Stack
 
